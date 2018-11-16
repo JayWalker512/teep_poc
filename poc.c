@@ -34,6 +34,9 @@ void reader(int * numWriters) {
         pthread_mutex_lock(&mutex);
         while (numWritersWaiting < *numWriters) {
             pthread_cond_wait(&swappable, &mutex);
+
+            /*FIXME race condition is because this thread runs again before writers
+              have a chance to decrement their numWritersWaiting variable. */
         }
 
         //when all the threads are done writing, we regain the lock (via condition variable)
@@ -50,7 +53,7 @@ void reader(int * numWriters) {
 }
 
 void writer() {
-    char oldBuffer = buffer[1]; 
+    char oldBuffer = 'b'; //initial value of buffer[1], not subject to memory access time
     while (1) {
         //wait for the first swap
         pthread_mutex_lock(&mutex);
@@ -62,20 +65,20 @@ void writer() {
             pthread_cond_wait(&writable, &mutex);
         }
         numWritersWaiting -= 1;
-        oldBuffer = buffer[1]; //update our "old buffer" value so we now when it's changed again
+        oldBuffer = buffer[1]; //update our "old buffer" value so we know when it's changed again
         pthread_mutex_unlock(&mutex);
 
         //here is where the writers dole out their buffer and wait for a swap when finished
         //don't need to lock the writers buffer since we're just reading from it and writing to 
         //separate destinations
         char stringBuffer[128] = {0};
-        sprintf(stringBuffer, "Writing from buffer %c", buffer[1]);
+        sprintf(stringBuffer, "Writing from buffer %c", oldBuffer);
         syncPrintTimestampedString(stringBuffer);
     }    
 }
 
 int main(int argc, char *argv[]) {
-    int numThreads = 8;
+    int numThreads = 2;
     pthread_t readerThread;
     pthread_t writerThreads[numThreads];
     
