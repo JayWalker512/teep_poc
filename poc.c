@@ -45,7 +45,7 @@ void reader(int * numWriters) {
         buffer[0] = buffer[1];
         buffer[1] = temp;
         numWritersWaiting = 0;
-        sprintf(stringBuffer, "Swapped buffer, %c is now in position 0", buffer[0]);
+        sprintf(stringBuffer, "TR Swapped buffer, %c is now in position 0", buffer[0]);
         count = syncPrintTimestampedString(stringBuffer);
 
         pthread_mutex_unlock(&mutex);
@@ -54,6 +54,7 @@ void reader(int * numWriters) {
 }
 
 void writer(int * writerId) {
+    printf("Writer %d started\n", *writerId);
     long timeout = 1000000;
     long count = 0;
     char oldBuffer = 'b'; //initial value of buffer[1], not subject to memory access time
@@ -74,7 +75,6 @@ void writer(int * writerId) {
         while (buffer[1] == oldBuffer) {
             pthread_cond_wait(&writable, &mutex);
         }
-        //numWritersWaiting -= 1;
         oldBuffer = buffer[1]; //update our "old buffer" value so we know when it's changed again
         pthread_mutex_unlock(&mutex);
 
@@ -82,12 +82,11 @@ void writer(int * writerId) {
         //don't need to lock the writers buffer since we're just reading from it and writing to 
         //separate destinations
         char stringBuffer[128] = {0};
-        sprintf(stringBuffer, "Writing from buffer %c", buffer[1]);
+        sprintf(stringBuffer, "T%d Writing from buffer %c", *writerId, buffer[1]);
         count = syncPrintTimestampedString(stringBuffer);
 
         //write some data to our thingadoo for correctness checking
         fputc(buffer[1], fp);
-        //fflush(fp);
     }    
     fclose(fp);
 }
@@ -110,9 +109,11 @@ int main(int argc, char *argv[]) {
 
     //create the threads
     pthread_create(&readerThread, NULL, (void *)reader, &numThreads);
+    int ids[numThreads];
     for (int i = 0; i < numThreads; i++) {
+        ids[i] = i;
         printf("Starting writer thread %d\n", i);
-        pthread_create(&writerThreads[i], NULL, (void *)writer, &i);        
+        pthread_create(&writerThreads[i], NULL, (void *)writer, &ids[i]);        
     }
 
     //destroy the threads
