@@ -6,32 +6,32 @@
 
 char buffer[2] = {'a', 'b'};
 int numWritersWaiting = 0;
-int numThreadsObservedSwap = 0;
-bool readerFinished = false;
 pthread_mutex_t mutex;
 pthread_cond_t swappable;
 pthread_cond_t writable;
-pthread_cond_t observedSwap;
 
 
 pthread_mutex_t printMutex;
-void syncPrintTimestampedString(char * string) {
+long syncPrintTimestampedString(char * string) {
     static long timestamp = 0;
     pthread_mutex_lock(&printMutex);
     timestamp++;
     printf("%ld: %s\n", timestamp, string);
-    pthread_mutex_unlock(&printMutex);    
+    pthread_mutex_unlock(&printMutex);
+    return timestamp;    
 }
 
 
 void reader(int * numWriters) {
+    long timeout = 1000000;
+    long count = 0;
     printf("Number of writers: %d\n", *numWriters);
-    while (1) {
+    while (count < timeout) {
         //here is where the reader fills it's buffer and waits until writers are waiting to swap
         //first, fill buffer 0    
         char stringBuffer[128] = {0};    
         sprintf(stringBuffer, "Reading into buffer %c", buffer[0]);
-        syncPrintTimestampedString(stringBuffer);
+        count = syncPrintTimestampedString(stringBuffer);
 
         //then, wait until the writers are done
         pthread_mutex_lock(&mutex);
@@ -39,18 +39,14 @@ void reader(int * numWriters) {
             pthread_cond_wait(&swappable, &mutex);
         }
 
-        while (numThreadsObservedSwap < *numWriters) {
-            pthread_cond_wait(&observedSwap, &mutex);
-        }
-
         //when all the threads are done writing, we regain the lock (via condition variable)
         //and swap the buffer
         char temp = buffer[0];
         buffer[0] = buffer[1];
         buffer[1] = temp;
-        numThreadsObservedSwap = 0;
+        numWritersWaiting = 0;
         sprintf(stringBuffer, "Swapped buffer, %c is now in position 0", buffer[0]);
-        syncPrintTimestampedString(stringBuffer);
+        count = syncPrintTimestampedString(stringBuffer);
 
         pthread_mutex_unlock(&mutex);
         pthread_cond_broadcast(&writable); //wake all the writers waiting for the next step
@@ -58,14 +54,17 @@ void reader(int * numWriters) {
 }
 
 void writer(int * writerId) {
+    long timeout = 1000000;
+    long count = 0;
     char oldBuffer = 'b'; //initial value of buffer[1], not subject to memory access time
-    char fileName[3] = {0};
-    fileName[0] = ((char)*writerId) + 65;
+    char fileName[10] = {'f','i','l','e',0,0,0,0,0,0};
+    fileName[4] = ((char)*writerId) + 65;
     FILE *fp = fopen(fileName, "w");
     if (fp == NULL) {
+        puts("Failed to open file!");
         return;
     }
-    while (1) {
+    while (count < timeout) {
         //wait for the first swap
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
@@ -75,27 +74,26 @@ void writer(int * writerId) {
         while (buffer[1] == oldBuffer) {
             pthread_cond_wait(&writable, &mutex);
         }
-        numWritersWaiting -= 1;
-        numThreadsObservedSwap += 1;
+        //numWritersWaiting -= 1;
         oldBuffer = buffer[1]; //update our "old buffer" value so we know when it's changed again
         pthread_mutex_unlock(&mutex);
-        pthread_cond_signal(&observedSwap);
 
         //here is where the writers dole out their buffer and wait for a swap when finished
         //don't need to lock the writers buffer since we're just reading from it and writing to 
         //separate destinations
         char stringBuffer[128] = {0};
         sprintf(stringBuffer, "Writing from buffer %c", buffer[1]);
-        syncPrintTimestampedString(stringBuffer);
+        count = syncPrintTimestampedString(stringBuffer);
 
         //write some data to our thingadoo for correctness checking
         fputc(buffer[1], fp);
-        fflush(fp);
+        //fflush(fp);
     }    
+    fclose(fp);
 }
 
 int main(int argc, char *argv[]) {
-    int numThreads = 2;
+    int numThreads = 4;
     pthread_t readerThread;
     pthread_t writerThreads[numThreads];
     
@@ -103,18 +101,17 @@ int main(int argc, char *argv[]) {
     pthread_mutex_init(&mutex, NULL);
     pthread_cond_init(&swappable, NULL);
     pthread_cond_init(&writable, NULL);
-    pthread_cond_init(&observedSwap, NULL);
 
     //mutex for locking stdout
     pthread_mutex_init(&printMutex, NULL);
 
     //initialize synchronization state
     numWritersWaiting = numThreads; //initially all the writers are waiting for the first buffer
-    numThreadsObservedSwap = numThreads;
 
     //create the threads
     pthread_create(&readerThread, NULL, (void *)reader, &numThreads);
     for (int i = 0; i < numThreads; i++) {
+        printf("Starting writer thread %d\n", i);
         pthread_create(&writerThreads[i], NULL, (void *)writer, &i);        
     }
 
