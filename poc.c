@@ -8,8 +8,8 @@ char buffer; //uninitialized because we 'fill' the buffer before starting thread
 int numWritersWaiting = 0;
 pthread_mutex_t mutex;
 pthread_cond_t writable;
-int numThreads = 8;
-long timeout = 4096;
+int numThreads = 16;
+long timeout = 16384;
 long swapcount = 0;
 bool swapped;
 
@@ -44,25 +44,30 @@ void writer(int * writerId) {
         return;
     }
 
+    bool refilledBuffer = false;
     while (swapcount < timeout) {
         //write some data to our thingadoo for correctness checking
         fputc(buffer, fp);
 
         //give each thread some busy work to do
-        //for (int i = 0; i < 1000; i++) {}
+        for (int i = 0; i < 1000; i++) {}
         
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
         if (numWritersWaiting == numThreads) {
             buffer = fillBuffer(buffer);
             numWritersWaiting = 0;
-            pthread_cond_broadcast(&writable);
-
+            //pthread_cond_broadcast(&writable); //signal while locked -> spurious wakeup
+	    refilledBuffer = true; 	
             swapcount++; //just to add an exit condition for the POC
         } else {
             pthread_cond_wait(&writable, &mutex);
         }
         pthread_mutex_unlock(&mutex);
+        if (refilledBuffer) { //avoid spurious wakeup by releasing lock before broadcast
+            pthread_cond_broadcast(&writable);
+            refilledBuffer = false;
+        }
     }    
     fclose(fp);
     char stringBuffer[128] = {0};
