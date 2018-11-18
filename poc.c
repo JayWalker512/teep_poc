@@ -9,6 +9,7 @@ int numWritersWaiting = 0;
 pthread_mutex_t mutex;
 pthread_cond_t swappable;
 pthread_cond_t writable;
+int swapcount = 0;
 
 
 pthread_mutex_t printMutex;
@@ -25,13 +26,13 @@ long syncPrintTimestampedString(char * string) {
 void reader(int * numWriters) {
     long timeout = 1000000;
     long count = 0;
-    printf("Number of writers: %d\n", *numWriters);
-    while (count < timeout) {
+    printf("Reader started. Number of writers: %d\n", *numWriters);
+    while (swapcount < timeout) {
         //here is where the reader fills it's buffer and waits until writers are waiting to swap
         //first, fill buffer 0    
         char stringBuffer[128] = {0};    
         sprintf(stringBuffer, "Reading into buffer %c", buffer[0]);
-        count = syncPrintTimestampedString(stringBuffer);
+        //count = syncPrintTimestampedString(stringBuffer);
 
         //then, wait until the writers are done
         pthread_mutex_lock(&mutex);
@@ -45,11 +46,12 @@ void reader(int * numWriters) {
         buffer[0] = buffer[1];
         buffer[1] = temp;
         numWritersWaiting = 0;
+        swapcount++;
         sprintf(stringBuffer, "TR Swapped buffer, %c is now in position 0", buffer[0]);
-        count = syncPrintTimestampedString(stringBuffer);
+        //count = syncPrintTimestampedString(stringBuffer);
 
         pthread_mutex_unlock(&mutex);
-        pthread_cond_broadcast(&writable); //wake all the writers waiting for the next step
+        pthread_cond_broadcast(&writable); //wake all the writers waiting for the next 
     }
 }
 
@@ -65,7 +67,7 @@ void writer(int * writerId) {
         puts("Failed to open file!");
         return;
     }
-    while (count < timeout) {
+    while (swapcount < timeout) {
         //wait for the first swap
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
@@ -83,7 +85,8 @@ void writer(int * writerId) {
         //separate destinations
         char stringBuffer[128] = {0};
         sprintf(stringBuffer, "T%d Writing from buffer %c", *writerId, buffer[1]);
-        count = syncPrintTimestampedString(stringBuffer);
+        //count = syncPrintTimestampedString(stringBuffer);
+        count++;
 
         //write some data to our thingadoo for correctness checking
         fputc(buffer[1], fp);
@@ -92,7 +95,7 @@ void writer(int * writerId) {
 }
 
 int main(int argc, char *argv[]) {
-    int numThreads = 4;
+    int numThreads = 20;
     pthread_t readerThread;
     pthread_t writerThreads[numThreads];
     
