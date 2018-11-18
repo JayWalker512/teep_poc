@@ -4,13 +4,14 @@
 #include <stdbool.h>
 #include <string.h>
 
-char buffer[2] = {'a', 'b'};
+char buffer; //uninitialized because we 'fill' the buffer before starting threads
 int numWritersWaiting = 0;
 pthread_mutex_t mutex;
-pthread_cond_t swappable;
 pthread_cond_t writable;
-int swapcount = 0;
-
+int numThreads = 3;
+long timeout = 4096;
+long swapcount = 0;
+char oldBuffer;
 
 pthread_mutex_t printMutex;
 long syncPrintTimestampedString(char * string) {
@@ -22,51 +23,19 @@ long syncPrintTimestampedString(char * string) {
     return timestamp;    
 }
 
-void swapBuffers(char * first, char * second) {
-    char temp = *first;
-    *first = *second;
-    *second = temp;
-}
-
-void reader(int * numWriters) {
-    long timeout = 30;
-    long count = 0;
-    printf("Reader started. Number of writers: %d\n", *numWriters);
-    while (swapcount < timeout) {
-        //here is where the reader fills it's buffer and waits until writers are waiting to swap
-        //first, fill buffer 0    
-        char stringBuffer[128] = {0};    
-        sprintf(stringBuffer, "Reading into buffer %c", buffer[0]);
-        count = syncPrintTimestampedString(stringBuffer);
-
-        //then, wait until the writers are done
-        pthread_mutex_lock(&mutex);
-        while (numWritersWaiting < *numWriters) {
-            pthread_cond_wait(&swappable, &mutex);
-        }
-
-        //when all the threads are done writing, we regain the lock (via condition variable)
-        //and swap the buffer
-        swapBuffers(&buffer[0], &buffer[1]);
-        numWritersWaiting = 0;
-        swapcount++;
-        sprintf(stringBuffer, "TR Swapped buffer, %c is now in position 0", buffer[0]);
-        count = syncPrintTimestampedString(stringBuffer);
-
-        pthread_mutex_unlock(&mutex);
-        pthread_cond_broadcast(&writable); //wake all the writers waiting for the next 
+/* This is a placeholder function used to swap the contents of the buffer between
+'a' and 'b' to give an easy means of correctness checking. If currentBuffer = 'a' the
+function returns 'b', otherwise 'a'. */ 
+char fillBuffer(char currentBuffer) {
+    if (currentBuffer == 'a') {
+        return 'b';
     }
-    char stringBuffer[128] = {0};
-    sprintf(stringBuffer, "TR Reader quit.\n");
-    syncPrintTimestampedString(stringBuffer);
-    exit(0);
+    return 'a';
 }
 
 void writer(int * writerId) {
     printf("Writer %d started\n", *writerId);
-    long timeout = 3;
-    long count = 0;
-    char oldBuffer = 'b'; //initial value of buffer[1], not subject to memory access time
+
     char fileName[10] = {'f','i','l','e',0,0,0,0,0,0};
     fileName[4] = ((char)*writerId) + 65;
     FILE *fp = fopen(fileName, "w");
@@ -74,28 +43,24 @@ void writer(int * writerId) {
         puts("Failed to open file!");
         return;
     }
+
     while (swapcount < timeout) {
-        //wait for the first swap
+        //write some data to our thingadoo for correctness checking
+        fputc(buffer, fp);
+
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
-        pthread_cond_signal(&swappable); //tell the reader that at least one writer is waiting
-        
-        //wait until the buffer has swapped
-        while (buffer[1] == oldBuffer) {
+        while (numWritersWaiting < numThreads && oldBuffer == buffer) {
             pthread_cond_wait(&writable, &mutex);
         }
-        oldBuffer = buffer[1]; //update our "old buffer" value so we know when it's changed again
+        if (numWritersWaiting >= numThreads) { //If I am the last thread to finish, fill the buffer
+            oldBuffer = buffer;            
+            buffer = fillBuffer(buffer);
+            numWritersWaiting = 0;            
+            swapcount++; //this is just so that the POC eventually exits
+        }
         pthread_mutex_unlock(&mutex);
-
-        //here is where the writers dole out their buffer and wait for a swap when finished
-        //don't need to lock the writers buffer since we're just reading from it and writing to 
-        //separate destinations
-        char stringBuffer[128] = {0};
-        sprintf(stringBuffer, "T%d Writing from buffer %c", *writerId, buffer[1]);
-        count = syncPrintTimestampedString(stringBuffer);
-
-        //write some data to our thingadoo for correctness checking
-        fputc(buffer[1], fp);
+        pthread_cond_broadcast(&writable);
     }    
     fclose(fp);
     char stringBuffer[128] = {0};
@@ -103,28 +68,28 @@ void writer(int * writerId) {
     syncPrintTimestampedString(stringBuffer);
 
     //this is just a hack to avoid the deadlock when the writer quits first
-    exit(0);
+    //exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    int numThreads = 1;
-    pthread_t readerThread;
     pthread_t writerThreads[numThreads];
     
     //initialize mutex and condition variables
     pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&swappable, NULL);
     pthread_cond_init(&writable, NULL);
 
     //mutex for locking stdout
     pthread_mutex_init(&printMutex, NULL);
 
     //initialize synchronization state
-    numWritersWaiting = numThreads; //initially all the writers are waiting for the first buffer
+    numWritersWaiting = 0; //initially all the writers are waiting for the first buffer
 
     //create the threads
-    pthread_create(&readerThread, NULL, (void *)reader, &numThreads);
     int ids[numThreads];
+    
+    //read in the first buffer before even starting all the threads
+    buffer = 'a'; 
+    oldBuffer = buffer;
     for (int i = 0; i < numThreads; i++) {
         ids[i] = i;
         printf("Starting writer thread %d\n", i);
@@ -132,7 +97,6 @@ int main(int argc, char *argv[]) {
     }
 
     //destroy the threads
-    pthread_join(readerThread, NULL);
     for (int i = 0; i < numThreads; i++) {
         pthread_join(writerThreads[i], (void **)NULL);
     }

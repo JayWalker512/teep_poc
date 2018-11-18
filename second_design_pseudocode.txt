@@ -1,0 +1,21 @@
+main {
+    read in first buffer
+    start writer threads
+}
+
+writer {
+    write out buffer
+    lock mutex
+    writersWaiting++
+    while (writersWaiting < numWriters) {
+        wait(writable)
+    }
+    if (writersWaiting == numWriters) { //I am the last writer to finish
+        read in buffer
+        writersWaiting = 0
+    }
+    unlock mutex
+    broadcast writable //all threads wake up, write out the buffer
+}
+
+//This design doesn't work!
