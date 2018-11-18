@@ -22,6 +22,11 @@ long syncPrintTimestampedString(char * string) {
     return timestamp;    
 }
 
+void swapBuffers(char * first, char * second) {
+    char temp = *first;
+    *first = *second;
+    *second = temp;
+}
 
 void reader(int * numWriters) {
     long timeout = 30;
@@ -42,9 +47,7 @@ void reader(int * numWriters) {
 
         //when all the threads are done writing, we regain the lock (via condition variable)
         //and swap the buffer
-        char temp = buffer[0];
-        buffer[0] = buffer[1];
-        buffer[1] = temp;
+        swapBuffers(&buffer[0], &buffer[1]);
         numWritersWaiting = 0;
         swapcount++;
         sprintf(stringBuffer, "TR Swapped buffer, %c is now in position 0", buffer[0]);
