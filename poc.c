@@ -24,7 +24,7 @@ long syncPrintTimestampedString(char * string) {
 
 
 void reader(int * numWriters) {
-    long timeout = 1000000;
+    long timeout = 30;
     long count = 0;
     printf("Reader started. Number of writers: %d\n", *numWriters);
     while (swapcount < timeout) {
@@ -32,7 +32,7 @@ void reader(int * numWriters) {
         //first, fill buffer 0    
         char stringBuffer[128] = {0};    
         sprintf(stringBuffer, "Reading into buffer %c", buffer[0]);
-        //count = syncPrintTimestampedString(stringBuffer);
+        count = syncPrintTimestampedString(stringBuffer);
 
         //then, wait until the writers are done
         pthread_mutex_lock(&mutex);
@@ -48,16 +48,20 @@ void reader(int * numWriters) {
         numWritersWaiting = 0;
         swapcount++;
         sprintf(stringBuffer, "TR Swapped buffer, %c is now in position 0", buffer[0]);
-        //count = syncPrintTimestampedString(stringBuffer);
+        count = syncPrintTimestampedString(stringBuffer);
 
         pthread_mutex_unlock(&mutex);
         pthread_cond_broadcast(&writable); //wake all the writers waiting for the next 
     }
+    char stringBuffer[128] = {0};
+    sprintf(stringBuffer, "TR Reader quit.\n");
+    syncPrintTimestampedString(stringBuffer);
+    exit(0);
 }
 
 void writer(int * writerId) {
     printf("Writer %d started\n", *writerId);
-    long timeout = 1000000;
+    long timeout = 3;
     long count = 0;
     char oldBuffer = 'b'; //initial value of buffer[1], not subject to memory access time
     char fileName[10] = {'f','i','l','e',0,0,0,0,0,0};
@@ -85,17 +89,22 @@ void writer(int * writerId) {
         //separate destinations
         char stringBuffer[128] = {0};
         sprintf(stringBuffer, "T%d Writing from buffer %c", *writerId, buffer[1]);
-        //count = syncPrintTimestampedString(stringBuffer);
-        count++;
+        count = syncPrintTimestampedString(stringBuffer);
 
         //write some data to our thingadoo for correctness checking
         fputc(buffer[1], fp);
     }    
     fclose(fp);
+    char stringBuffer[128] = {0};
+    sprintf(stringBuffer, "T%d Writer quitting.\n", *writerId);
+    syncPrintTimestampedString(stringBuffer);
+
+    //this is just a hack to avoid the deadlock when the writer quits first
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    int numThreads = 20;
+    int numThreads = 1;
     pthread_t readerThread;
     pthread_t writerThreads[numThreads];
     
