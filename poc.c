@@ -8,10 +8,10 @@ char buffer; //uninitialized because we 'fill' the buffer before starting thread
 int numWritersWaiting = 0;
 pthread_mutex_t mutex;
 pthread_cond_t writable;
-int numThreads = 3;
+int numThreads = 8;
 long timeout = 4096;
 long swapcount = 0;
-char oldBuffer;
+bool swapped;
 
 pthread_mutex_t printMutex;
 long syncPrintTimestampedString(char * string) {
@@ -48,19 +48,21 @@ void writer(int * writerId) {
         //write some data to our thingadoo for correctness checking
         fputc(buffer, fp);
 
+        //give each thread some busy work to do
+        //for (int i = 0; i < 1000; i++) {}
+        
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
-        while (numWritersWaiting < numThreads && oldBuffer == buffer) {
+        if (numWritersWaiting == numThreads) {
+            buffer = fillBuffer(buffer);
+            numWritersWaiting = 0;
+            pthread_cond_broadcast(&writable);
+
+            swapcount++; //just to add an exit condition for the POC
+        } else {
             pthread_cond_wait(&writable, &mutex);
         }
-        if (numWritersWaiting >= numThreads) { //If I am the last thread to finish, fill the buffer
-            oldBuffer = buffer;            
-            buffer = fillBuffer(buffer);
-            numWritersWaiting = 0;            
-            swapcount++; //this is just so that the POC eventually exits
-        }
         pthread_mutex_unlock(&mutex);
-        pthread_cond_broadcast(&writable);
     }    
     fclose(fp);
     char stringBuffer[128] = {0};
@@ -89,7 +91,7 @@ int main(int argc, char *argv[]) {
     
     //read in the first buffer before even starting all the threads
     buffer = 'a'; 
-    oldBuffer = buffer;
+    swapped = false;
     for (int i = 0; i < numThreads; i++) {
         ids[i] = i;
         printf("Starting writer thread %d\n", i);
