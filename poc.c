@@ -9,9 +9,8 @@ int numWritersWaiting = 0;
 pthread_mutex_t mutex;
 pthread_cond_t writable;
 int numThreads = 16;
-long timeout = 16384;
+long timeout = 8192;
 long swapcount = 0;
-bool swapped;
 
 pthread_mutex_t printMutex;
 long syncPrintTimestampedString(char * string) {
@@ -46,19 +45,18 @@ void writer(int * writerId) {
 
     bool refilledBuffer = false;
     while (swapcount < timeout) {
-        //write some data to our thingadoo for correctness checking
-        fputc(buffer, fp);
+        //write some data to this threads file for correctness checking
+        fputc(buffer, fp); //this simulates the output of Tee
 
         //give each thread some busy work to do
-        for (int i = 0; i < 1000; i++) {}
+        for (int i = 0; i < 10000; i++) {} //Because Tee output wouldn't happen instantly
         
         pthread_mutex_lock(&mutex);
         numWritersWaiting += 1;
         if (numWritersWaiting == numThreads) {
             buffer = fillBuffer(buffer);
             numWritersWaiting = 0;
-            //pthread_cond_broadcast(&writable); //signal while locked -> spurious wakeup
-	    refilledBuffer = true; 	
+	    	refilledBuffer = true; 	
             swapcount++; //just to add an exit condition for the POC
         } else {
             pthread_cond_wait(&writable, &mutex);
@@ -68,14 +66,12 @@ void writer(int * writerId) {
             pthread_cond_broadcast(&writable);
             refilledBuffer = false;
         }
-    }    
+    }   
+     
     fclose(fp);
     char stringBuffer[128] = {0};
     sprintf(stringBuffer, "T%d Writer quitting.\n", *writerId);
     syncPrintTimestampedString(stringBuffer);
-
-    //this is just a hack to avoid the deadlock when the writer quits first
-    //exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -95,8 +91,7 @@ int main(int argc, char *argv[]) {
     int ids[numThreads];
     
     //read in the first buffer before even starting all the threads
-    buffer = 'a'; 
-    swapped = false;
+    buffer = 'a';
     for (int i = 0; i < numThreads; i++) {
         ids[i] = i;
         printf("Starting writer thread %d\n", i);
@@ -109,14 +104,3 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
-
-/* Notes:
-
-Critical section operations
-- swapping buffer: only Reader thread can do this. Writers must be finished.
-- incrementing count of Writers waiting: each Writer thread must increment once when done
-
-
-
-
-*/
