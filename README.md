@@ -1,6 +1,11 @@
 Teep Proof of Concept
 ---------------------
 
+What is Teep? Teep is a parallel implementation of Tee, where writes all happen in parallel. This repository is not the source code for Teep, instead it is a simplified version of the code which Teep uses to parallelize writes. I wrote this proof of concept to check that my multithreaded code was correct and free of race conditions.
+
+Compiling
+---------
+
 Compile with:
 
 gcc -o poc poc.c -lpthread
